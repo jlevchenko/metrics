@@ -1,0 +1,5 @@
+program,region,n_grantees,total_hired_y1,total_hired_y2,total_students_y1,total_students_y2,avg_psych_ratio
+SBMH,Central,24,340.0,245.0,42375.0,137289.0,943.6
+SBMH,Northeast,16,273.0,652.0,99304.0,815448.0,894.4
+SBMH,Southeast,15,213.0,112.0,258773.0,72959.0,1712.9
+SBMH,West,27,246.0,555.0,96559.0,170478.0,587.0
