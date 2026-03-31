@@ -1,0 +1,375 @@
+---
+title: "APR Data Cleaning: Region Assignment and Raw Variable Extraction"
+author: "WCER School Mental Health Collaborative"
+date: "`r Sys.Date()`"
+output:
+  html_notebook:
+    df_print: paged
+    highlight: pygments
+    number_sections: yes
+    theme: default
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+  html_document:
+    df_print: paged
+    highlight: pygments
+    number_sections: yes
+    theme: default
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+---
+
+## Overview
+
+This notebook cleans and prepares Annual Performance Report (APR) data for the two
+federal school mental health grant programs administered by the WCER School Mental
+Health Collaborative: **MHSP** (Mental Health Service Professionals) and **SBMH**
+(School-Based Mental Health). The source file is a two-sheet Excel workbook exported
+from the APR data system.
+
+The cleaning steps are:
+
+1. Import each program sheet and standardize headers
+2. Identify and resolve duplicate column names
+3. Check for duplicate grantee records
+4. Assign HHS geographic regions to each grantee based on state
+5. Extract the raw-number GPRA outcome variables needed for downstream analysis
+6. Export cleaned files to Excel
+
+---
+
+## 1. Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+# Install any missing packages, then load all required libraries
+packages <- c("readxl", "tidyverse", "writexl")
+install.packages(setdiff(packages, installed.packages()[, "Package"]),
+                 quiet = TRUE)
+invisible(sapply(packages, library, character.only = TRUE))
+```
+
+---
+
+## 2. MHSP Program Data
+
+### 2.1 Import
+
+The APR workbook uses a two-row header structure: row 1 is a metadata banner and
+row 2 contains the actual column names. Row 3 is a formatting separator that must
+also be dropped before analysis.
+
+```{r mhsp-import, message=FALSE}
+mhsp <- read_excel(
+  "I:/GitHub Documents/2024/METRICS/Ad Hoc Requests/APR_Application_Data_Synthetic.xlsx",
+  sheet = 1,
+  col_names = FALSE
+)
+
+# Promote row 2 to column names, then drop header rows 1-3
+colnames(mhsp) <- as.character(unlist(mhsp[2, ]))
+mhsp <- mhsp[-c(1:3), ]
+
+# Drop any trailing all-NA column produced by the Excel export
+mhsp <- mhsp[, colSums(is.na(mhsp)) < nrow(mhsp)]
+
+cat("MHSP rows after import:", nrow(mhsp), "\n")
+cat("MHSP columns after import:", ncol(mhsp), "\n")
+```
+
+```{r mhsp-preview}
+head(mhsp)
+```
+
+### 2.2 Resolve Duplicate Column Names
+
+The APR export sometimes produces identically named columns when a GPRA measure
+appears in both an annual and a current-year block. This function detects duplicated
+names, verifies whether the two versions carry identical values, renames them with
+`_1` / `_2` suffixes for inspection, and logs the result.
+
+```{r mhsp-dup-cols}
+resolve_duplicate_columns <- function(df) {
+  dup_names <- unique(names(df)[duplicated(names(df))])
+
+  if (length(dup_names) == 0) {
+    message("No duplicate column names found.")
+    return(df)
+  }
+
+  for (nm in dup_names) {
+    idx <- which(names(df) == nm)
+
+    if (length(idx) != 2) {
+      warning(sprintf(
+        "Expected exactly 2 copies of '%s' but found %d. Skipping.",
+        nm, length(idx)
+      ))
+      next
+    }
+
+    # Rename for side-by-side comparison
+    names(df)[idx] <- paste0(nm, "_", 1:2)
+
+    identical_vals <- all(df[[idx[1]]] == df[[idx[2]]], na.rm = TRUE)
+    message(sprintf(
+      "Duplicate '%s' (cols %d & %d): values are %s.",
+      nm, idx[1], idx[2],
+      ifelse(identical_vals, "IDENTICAL", "DIFFERENT -- review required")
+    ))
+  }
+
+  df
+}
+
+mhsp <- resolve_duplicate_columns(mhsp)
+```
+
+**Cross-check duplicated columns before dropping.** If `resolve_duplicate_columns()`
+found duplicates, it renamed them to `_1` / `_2`. The checks below only run when those
+suffixed columns exist; they should return zero rows if the values are truly identical.
+
+```{r mhsp-crosscheck}
+crosscheck_pair <- function(df, col1, col2) {
+  if (!all(c(col1, col2) %in% names(df))) {
+    message(sprintf("Columns '%s' and '%s' not present -- no duplicate to check.", col1, col2))
+    return(invisible(NULL))
+  }
+  result <- df |>
+    select(Grantee_Number, all_of(c(col1, col2))) |>
+    filter(.data[[col1]] != .data[[col2]])
+  if (nrow(result) == 0) {
+    message(sprintf("'%s' vs '%s': values are identical across all rows.", col1, col2))
+  } else {
+    message(sprintf("'%s' vs '%s': %d row(s) differ -- review before dropping.", col1, col2, nrow(result)))
+    print(result)
+  }
+}
+
+crosscheck_pair(mhsp, "GPRA2_A_Annual_Ratio_Actual_DEN_1",       "GPRA2_A_Annual_Ratio_Actual_DEN_2")
+crosscheck_pair(mhsp, "GPRA2_A_Annual_Ratio_Actual_NUM_1",       "GPRA2_A_Annual_Ratio_Actual_NUM_2")
+crosscheck_pair(mhsp, "GPRA3_B_PreviousAnnual_Ratio_Target_1",   "GPRA3_B_PreviousAnnual_Ratio_Target_2")
+```
+
+Keep the first copy of each duplicated column and assign clean names. The rename
+and drop only execute when the suffixed columns are present.
+
+```{r mhsp-rename-cols}
+# Rename _1 copies to their clean names (only if duplicates were found)
+rename_map <- c(
+  GPRA2_A_Annual_Ratio_Actual_DEN = "GPRA2_A_Annual_Ratio_Actual_DEN_1",
+  GPRA2_A_Annual_Ratio_Actual_NUM = "GPRA2_A_Annual_Ratio_Actual_NUM_1",
+  GPRA2_B_Annual_Ratio_Actual_NUM = "GPRA2_A_Annual_Ratio_Actual_NUM_2"
+)
+present_renames <- rename_map[rename_map %in% names(mhsp)]
+if (length(present_renames) > 0) {
+  mhsp <- rename(mhsp, all_of(present_renames))
+}
+
+# Drop the _2 redundant DEN column if it still exists
+if ("GPRA2_A_Annual_Ratio_Actual_DEN_2" %in% names(mhsp)) {
+  mhsp <- select(mhsp, -GPRA2_A_Annual_Ratio_Actual_DEN_2)
+}
+
+message(sprintf("MHSP column count after deduplication: %d", ncol(mhsp)))
+```
+
+### 2.3 Check for Duplicate Grantee Records
+
+Each grantee should appear exactly once. Any duplicates must be resolved before
+the file is used in analysis.
+
+```{r mhsp-dup-rows}
+mhsp |>
+  group_by(Grantee_Number) |>
+  filter(n() > 1) |>
+  arrange(Grantee_Number)
+```
+
+### 2.4 Assign HHS Geographic Regions
+
+Grantees are assigned to one of four broad geographic regions based on their
+state abbreviation. These regions are used to stratify reporting and visualizations
+in downstream analyses.
+
+```{r region-setup}
+# State-to-region lookup vectors
+west      <- c("WA", "OR", "NV", "UT", "ID", "MT", "WY", "CO",
+                "AZ", "NM", "AK", "CA", "HI")
+central   <- c("ND", "MN", "WI", "MI", "NE", "SD", "KS", "IA",
+                "OK", "MO", "IL", "IN")
+northeast <- c("KY", "WV", "VA", "OH", "PA", "DC", "MD", "DE",
+                "NJ", "RI", "CT", "MA", "NY", "VT", "NH", "ME")
+southeast <- c("TX", "LA", "AR", "TN", "MS", "AL", "GA",
+                "NC", "SC", "FL", "PR")
+
+assign_region <- function(state) {
+  dplyr::case_when(
+    state %in% west      ~ "West",
+    state %in% central   ~ "Central",
+    state %in% northeast ~ "Northeast",
+    state %in% southeast ~ "Southeast",
+    TRUE                 ~ "Unknown"
+  )
+}
+```
+
+```{r mhsp-region}
+mhsp <- mhsp |>
+  mutate(Region = assign_region(State))
+
+# Verify all states mapped correctly
+mhsp |>
+  group_by(Region) |>
+  summarise(n = n(), .groups = "drop") |>
+  mutate(pct = round(n / sum(n) * 100, 1))
+```
+
+---
+
+## 3. SBMH Program Data
+
+### 3.1 Import
+
+```{r sbmh-import, message=FALSE}
+sbmh <- read_excel(
+  "I:/GitHub Documents/2024/METRICS/Ad Hoc Requests/APR_Application_Data_Synthetic.xlsx",
+  sheet = 2,
+  col_names = FALSE
+)
+
+colnames(sbmh) <- as.character(unlist(sbmh[2, ]))
+sbmh <- sbmh[-c(1:3), ]
+sbmh <- sbmh[, colSums(is.na(sbmh)) < nrow(sbmh)]
+
+cat("SBMH rows after import:", nrow(sbmh), "\n")
+cat("SBMH columns after import:", ncol(sbmh), "\n")
+```
+
+```{r sbmh-preview}
+head(sbmh)
+```
+
+### 3.2 Check for Duplicate Column Names
+
+```{r sbmh-dup-cols}
+dup_names <- names(sbmh)[duplicated(names(sbmh))]
+
+if (length(dup_names) == 0) {
+  message("No duplicate column names found in SBMH.")
+} else {
+  are_identical <- all(sbmh[[dup_names[1]]] == sbmh[[dup_names[2]]], na.rm = TRUE)
+  message(sprintf(
+    "Duplicate '%s': values are %s.",
+    dup_names[1],
+    ifelse(are_identical, "identical", "DIFFERENT -- review required")
+  ))
+}
+```
+
+### 3.3 Check for Duplicate Grantee Records
+
+```{r sbmh-dup-rows}
+sbmh |>
+  group_by(Grantee_Number) |>
+  filter(n() > 1) |>
+  arrange(Grantee_Number)
+```
+
+### 3.4 Assign HHS Geographic Regions
+
+```{r sbmh-region}
+sbmh <- sbmh |>
+  mutate(Region = assign_region(State))
+
+# Check for any unmatched states
+unknown_states <- sbmh |> filter(Region == "Unknown")
+
+if (nrow(unknown_states) > 0) {
+  message(sprintf("%d rows have an unrecognized state code:", nrow(unknown_states)))
+  print(unknown_states |> select(Grantee_Number, State, Region))
+} else {
+  message("All states mapped to a region successfully.")
+}
+```
+
+```{r sbmh-drop-na-grantee}
+# Drop any rows where Grantee_Number is NA (formatting artifacts from the export)
+sbmh <- sbmh |> filter(!is.na(Grantee_Number))
+
+# Final region distribution
+sbmh |>
+  group_by(Region) |>
+  summarise(n = n(), .groups = "drop") |>
+  mutate(pct = round(n / sum(n) * 100, 1))
+```
+
+---
+
+## 4. Export Cleaned Files
+
+### 4.1 MHSP -- Full Cleaned File and Raw-Variable Subset
+
+```{r mhsp-export}
+mhsp_output <- "I:/GitHub Documents/2024/METRICS/Ad Hoc Requests/mhsp_cleaned.xlsx"
+write_xlsx(mhsp, mhsp_output)
+cat("Full MHSP data saved to:", mhsp_output, "\n")
+
+# Raw outcome variables only
+mhsp_raw_vars <- c(
+  "Grantee_Number", "Grantee_Name", "Grantee_Type", "State", "Region",
+  "SUD_reference", "CP1_YN", "CP1_Met",
+  "GPRA1_A_Annual_Raw_Target", "GPRA1_A_Annual_Raw_Actual",
+  "GPRA1_B_Current_Raw_Target", "GPRA1_B_Current_Raw_Actual",
+  "GPRA2_A_Annual_Raw_Target", "GPRA2_A_Annual_Raw_Actual",
+  "GPRA2_B_Current_Raw_Target", "GPRA2_B_Current_Raw_Actual",
+  "GPRA3_A_Annual_Raw_Target", "GPRA3_A_Annual_Raw_Actual",
+  "GPRA3_B_PreviousAnnual_Raw_Target", "GPRA3_B_PreviousAnnual_Raw_Actual",
+  "GPRA4_ PP1_Raw_Target", "GPRA4_ PP1_Raw_Actual"
+)
+
+mhsp_raw <- mhsp[, intersect(mhsp_raw_vars, names(mhsp))]
+mhsp_raw_output <- "I:/GitHub Documents/2024/METRICS/Ad Hoc Requests/mhsp_raw.xlsx"
+write_xlsx(mhsp_raw, mhsp_raw_output)
+cat("MHSP raw-variable subset saved to:", mhsp_raw_output, "\n")
+```
+
+### 4.2 SBMH -- Full Cleaned File and Raw-Variable Subset
+
+```{r sbmh-export}
+sbmh_output <- "I:/GitHub Documents/2024/METRICS/Ad Hoc Requests/sbmh_cleaned.xlsx"
+write_xlsx(sbmh, sbmh_output)
+cat("Full SBMH data saved to:", sbmh_output, "\n")
+
+# Raw outcome variables only
+sbmh_raw_vars <- c(
+  "Grantee_Number", "Grantee_Name", "Grantee_Type", "State", "Region",
+  "SUD_Reference", "CP1_YN", "CP1_Met",
+  "GPRA1_Raw_Target", "GPRA1_Raw_Actual",
+  "GPRA2_Raw_Target", "GPRA2_Raw_Actual",
+  "GPRA3_Ratio_Target", "GPRA3_Ratio_Actual",
+  "GPRA4_Raw_Target", "GPRA4_Raw_Actual",
+  "GPRA5_Raw_Target", "GPRA5_Raw_Actual",
+  "GPRA6_Raw_Target", "GPRA6_Raw_Actual"
+)
+
+sbmh_raw <- sbmh[, intersect(sbmh_raw_vars, names(sbmh))]
+sbmh_raw_output <- "I:/GitHub Documents/2024/METRICS/Ad Hoc Requests/sbmh_raw.xlsx"
+write_xlsx(sbmh_raw, sbmh_raw_output)
+cat("SBMH raw-variable subset saved to:", sbmh_raw_output, "\n")
+```
+
+---
+
+## 5. Session Info
+
+```{r session-info}
+sessionInfo()
+```
