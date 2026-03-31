@@ -1,0 +1,376 @@
+---
+title: "IPR Aggregated Data -- Raw GPRA Targets and Actuals"
+author: "WCER School Mental Health Collaborative"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_notebook:
+    df_print: paged
+    highlight: tango
+    number_sections: yes
+    theme: flatly
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  html_document:
+    df_print: paged
+    highlight: tango
+    number_sections: yes
+    theme: flatly
+    toc: yes
+    toc_float: yes
+---
+
+## Overview
+
+This notebook aggregates Interim Performance Report (IPR) data for the two federal
+school mental health grant programs -- **MHSP** and **SBMH** -- and computes
+program-wide totals and descriptive statistics for all GPRA outcome measures.
+
+The workflow for each program:
+
+1. Import the revised IPR Excel file and standardize headers
+2. Detect and remove duplicate Grant IDs
+3. Cross-check grant roster against the APR reference file
+4. Clean each GPRA column (rename, coerce to numeric, recode 999 to NA)
+5. Compute sum, mean, min, max, and n for each measure
+6. Flag grantees with missing values
+7. Produce a narrative "Additional Information" paragraph for each measure
+8. Export a summary table and a revision follow-up list
+
+---
+
+## 1. Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+source("R/helpers.R")
+load_packages(c("readxl", "tidyverse", "writexl", "knitr"))
+```
+
+---
+
+## 2. MHSP
+
+### 2.1 Import
+
+```{r mhsp-import}
+mhsp <- import_ipr_sheet("data/REVISED_MHSP_IPR_Synthetic.xlsx")
+cat("MHSP rows:", nrow(mhsp), "| Columns:", ncol(mhsp), "\n")
+head(mhsp)
+```
+
+### 2.2 Duplicate Grant IDs
+
+```{r mhsp-dupes}
+mhsp <- deduplicate_grants(mhsp, id_col = "Grant ID")
+```
+
+### 2.3 Cross-check Against APR Roster
+
+```{r mhsp-crosscheck, message=FALSE}
+mhsp_apr <- suppressMessages(
+  read_excel("data/APRs_Revised_Tiers_Synthetic.xlsx", sheet = 1)
+)
+cat("APR reference rows (MHSP):", nrow(mhsp_apr), "\n")
+crosscheck_grants(mhsp$`Grant ID`, mhsp_apr$grantee_number,
+                  ipr_label = "MHSP IPR", apr_label = "MHSP APR")
+```
+
+---
+
+## 3. MHSP GPRA Measures
+
+For each measure the steps are: rename, coerce to numeric, recode 999 to NA,
+then print the sum/mean and list any grantees with missing values.
+
+```{r mhsp-clean-gpra, warning=FALSE}
+# Rename all GPRA columns in one pass
+mhsp <- mhsp |>
+  clean_gpra_col("GPRA 1A Target (Raw)", "gpra_1a_target") |>
+  clean_gpra_col("GPRA 1A Actual (Raw)", "gpra_1a_actual") |>
+  clean_gpra_col("GPRA 1B Target (Raw)", "gpra_1b_target") |>
+  clean_gpra_col("GPRA 1B Actual (Raw)", "gpra_1b_actual") |>
+  clean_gpra_col("GPRA 2A Target (Raw)", "gpra_2a_target") |>
+  clean_gpra_col("GPRA 2A Actual (Raw)", "gpra_2a_actual") |>
+  clean_gpra_col("GPRA 2B Target (Raw)", "gpra_2b_target") |>
+  clean_gpra_col("GPRA 2B Actual (Raw)", "gpra_2b_actual") |>
+  clean_gpra_col("GPRA 3A Target (Raw)", "gpra_3a_target") |>
+  clean_gpra_col("GPRA 3A Actual (Raw)", "gpra_3a_actual") |>
+  clean_gpra_col("GPRA 3B Target (Raw)", "gpra_3b_target") |>
+  clean_gpra_col("GPRA 3B Actual (Raw)", "gpra_3b_actual")
+```
+
+### 3.1 GPRA 1 -- Providers Trained
+
+#### Target
+
+```{r mhsp-gpra1-target}
+summarise_gpra_col(mhsp, "gpra_1a_target", "GPRA 1A Target")
+missing_grantees(mhsp, "gpra_1a_target")
+summarise_gpra_col(mhsp, "gpra_1b_target", "GPRA 1B Target")
+missing_grantees(mhsp, "gpra_1b_target")
+```
+
+#### Actual
+
+```{r mhsp-gpra1-actual}
+summarise_gpra_col(mhsp, "gpra_1a_actual", "GPRA 1A Actual")
+missing_grantees(mhsp, "gpra_1a_actual")
+summarise_gpra_col(mhsp, "gpra_1b_actual", "GPRA 1B Actual")
+missing_grantees(mhsp, "gpra_1b_actual")
+```
+
+#### Narrative
+
+```{r mhsp-gpra1-narrative}
+total_grantees <- nrow(mhsp)
+submitted_1a   <- sum(!is.na(mhsp$gpra_1a_actual))
+enrolled_1b    <- sum(mhsp$gpra_1b_target, na.rm = TRUE)
+
+rev_summary <- revision_summary(mhsp, label = "MHSP")
+rev_pct     <- rev_summary$Pct_Submitted
+
+cat(glue::glue(
+  "Additional Information: The data included in this report was gathered via 2024 ",
+  "Interim Performance Reports and reflect interim performance based on {submitted_1a} ",
+  "out of {total_grantees} grantees that submitted data for this measure. Grantees who ",
+  "did not submit data have been contacted and provided with feedback. {rev_pct}% of ",
+  "grantees who required revisions submitted revisions prior to 12/9/24 and were included ",
+  "in this report.\n\nThe actual data reflects the cumulative number of school-based mental ",
+  "health service providers who completed training by the grantee during the reporting period. ",
+  "There are {enrolled_1b} (GPRA 1B) providers currently enrolled in training.\n\n",
+  "Set targets for future years are based on actual data collected in year one."
+))
+```
+
+### 3.2 GPRA 2 -- Providers in Placement
+
+#### Target
+
+```{r mhsp-gpra2-target}
+summarise_gpra_col(mhsp, "gpra_2a_target", "GPRA 2A Target")
+missing_grantees(mhsp, "gpra_2a_target")
+summarise_gpra_col(mhsp, "gpra_2b_target", "GPRA 2B Target")
+missing_grantees(mhsp, "gpra_2b_target")
+```
+
+#### Actual
+
+```{r mhsp-gpra2-actual}
+summarise_gpra_col(mhsp, "gpra_2a_actual", "GPRA 2A Actual")
+missing_grantees(mhsp, "gpra_2a_actual")
+summarise_gpra_col(mhsp, "gpra_2b_actual", "GPRA 2B Actual")
+missing_grantees(mhsp, "gpra_2b_actual")
+```
+
+### 3.3 GPRA 3 -- Providers Hired and Retained
+
+#### Target
+
+```{r mhsp-gpra3-target}
+summarise_gpra_col(mhsp, "gpra_3a_target", "GPRA 3A Target")
+missing_grantees(mhsp, "gpra_3a_target")
+summarise_gpra_col(mhsp, "gpra_3b_target", "GPRA 3B Target")
+missing_grantees(mhsp, "gpra_3b_target")
+```
+
+#### Actual
+
+```{r mhsp-gpra3-actual}
+summarise_gpra_col(mhsp, "gpra_3a_actual", "GPRA 3A Actual")
+missing_grantees(mhsp, "gpra_3a_actual")
+summarise_gpra_col(mhsp, "gpra_3b_actual", "GPRA 3B Actual")
+missing_grantees(mhsp, "gpra_3b_actual")
+```
+
+### 3.4 MHSP Summary Table
+
+```{r mhsp-summary-table}
+mhsp_gpra_cols <- list(
+  list("gpra_1a_target", "GPRA 1A Target"), list("gpra_1a_actual", "GPRA 1A Actual"),
+  list("gpra_1b_target", "GPRA 1B Target"), list("gpra_1b_actual", "GPRA 1B Actual"),
+  list("gpra_2a_target", "GPRA 2A Target"), list("gpra_2a_actual", "GPRA 2A Actual"),
+  list("gpra_2b_target", "GPRA 2B Target"), list("gpra_2b_actual", "GPRA 2B Actual"),
+  list("gpra_3a_target", "GPRA 3A Target"), list("gpra_3a_actual", "GPRA 3A Actual"),
+  list("gpra_3b_target", "GPRA 3B Target"), list("gpra_3b_actual", "GPRA 3B Actual")
+)
+
+mhsp_summary <- bind_rows(lapply(mhsp_gpra_cols, function(x) {
+  summarise_gpra_col(mhsp, x[[1]], x[[2]])
+}))
+
+kable(mhsp_summary, format = "html",
+      caption = "Table 1. 2024 MHSP GPRA Targets and Actuals Summary")
+```
+
+---
+
+## 4. SBMH
+
+### 4.1 Import
+
+```{r sbmh-import}
+sbmh <- import_ipr_sheet("data/REVISED_SBMH_IPR_Synthetic.xlsx")
+cat("SBMH rows:", nrow(sbmh), "| Columns:", ncol(sbmh), "\n")
+head(sbmh)
+```
+
+### 4.2 Duplicate Grant IDs
+
+```{r sbmh-dupes}
+sbmh <- deduplicate_grants(sbmh, id_col = "Grant ID")
+```
+
+### 4.3 Cross-check Against APR Roster
+
+```{r sbmh-crosscheck, message=FALSE}
+sbmh_apr <- suppressMessages(
+  read_excel("data/APRs_Revised_Tiers_Synthetic.xlsx", sheet = 2)
+)
+cat("APR reference rows (SBMH):", nrow(sbmh_apr), "\n")
+crosscheck_grants(sbmh$`Grant ID`, sbmh_apr$grantee_number,
+                  ipr_label = "SBMH IPR", apr_label = "SBMH APR")
+```
+
+---
+
+## 5. SBMH GPRA Measures
+
+```{r sbmh-clean-gpra, warning=FALSE}
+sbmh <- sbmh |>
+  clean_gpra_col("GPRA 1 (Hired) Target (Raw)",       "gpra_1_target") |>
+  clean_gpra_col("GPRA 1 (Hired) Actual (Raw)",        "gpra_1_actual") |>
+  clean_gpra_col("GPRA 2 (Retention) Target (Raw)",   "gpra_2_target") |>
+  clean_gpra_col("GPRA 2 (Retention) Actual (Raw)",   "gpra_2_actual") |>
+  clean_gpra_col("GPRA 4 (Attrition) Target (Raw)",   "gpra_4_target") |>
+  clean_gpra_col("GPRA 4 (Attrition) Actual (Raw)",   "gpra_4_actual") |>
+  clean_gpra_col("GPRA 5 (Students Served) Target (Raw)", "gpra_5_target") |>
+  clean_gpra_col("GPRA 5 (Students Served) Actual (Raw)", "gpra_5_actual")
+```
+
+### 5.1 GPRA 1 -- Providers Hired
+
+```{r sbmh-gpra1}
+summarise_gpra_col(sbmh, "gpra_1_target", "GPRA 1 Target")
+summarise_gpra_col(sbmh, "gpra_1_actual", "GPRA 1 Actual")
+missing_grantees(sbmh, "gpra_1_actual")
+```
+
+### 5.2 GPRA 2 -- Provider Retention
+
+```{r sbmh-gpra2}
+summarise_gpra_col(sbmh, "gpra_2_target", "GPRA 2 Target")
+summarise_gpra_col(sbmh, "gpra_2_actual", "GPRA 2 Actual")
+missing_grantees(sbmh, "gpra_2_actual")
+```
+
+### 5.3 GPRA 3 -- Student-to-Provider Ratio
+
+GPRA 3 is reported as a ratio string (e.g., "45000:12") rather than a raw count.
+The `aggregate_ratios()` function parses and sums all numerators and denominators
+to produce a program-wide ratio.
+
+```{r sbmh-gpra3}
+sbmh <- rename(sbmh,
+  gpra_3_target = `GPRA 3 (Ratio) Target`,
+  gpra_3_actual = `GPRA 3 (Ratio) Actual`
+)
+
+# Target
+target_ratios <- aggregate_ratios(sbmh$gpra_3_target)
+cat("GPRA 3 Target -- Total:", target_ratios$total_numerator, ":",
+    target_ratios$total_denominator, "| Simplified:", target_ratios$simplified_ratio, "\n")
+
+# Actual
+actual_ratios <- aggregate_ratios(sbmh$gpra_3_actual)
+cat("GPRA 3 Actual -- Total:", actual_ratios$total_numerator, ":",
+    actual_ratios$total_denominator, "| Simplified:", actual_ratios$simplified_ratio, "\n")
+
+# Grantees with missing ratio data
+sbmh |> filter(is.na(gpra_3_actual)) |>
+  select(any_of(c("Grant ID", "Grantee Name", "Region", "Current Status",
+                   "Contact Person", "Contact Email")))
+```
+
+### 5.4 GPRA 4 -- Provider Attrition
+
+```{r sbmh-gpra4}
+# One grantee's GPRA 4 values are flagged as data entry errors; set to NA
+# before cleaning (update Grant ID to match the real dataset)
+# sbmh[sbmh$`Grant ID` == "S184H220226", c("gpra_4_target", "gpra_4_actual")] <- NA
+
+summarise_gpra_col(sbmh, "gpra_4_target", "GPRA 4 Target")
+summarise_gpra_col(sbmh, "gpra_4_actual", "GPRA 4 Actual")
+
+# Flag outliers (attrition > 100 is likely a data entry error)
+sbmh |>
+  filter(gpra_4_target > 100 | gpra_4_actual > 100) |>
+  select(any_of(c("Grant ID", "Grantee Name", "gpra_4_target", "gpra_4_actual")))
+```
+
+### 5.5 GPRA 5 -- Students Served
+
+```{r sbmh-gpra5}
+summarise_gpra_col(sbmh, "gpra_5_target", "GPRA 5 Target")
+summarise_gpra_col(sbmh, "gpra_5_actual", "GPRA 5 Actual")
+missing_grantees(sbmh, "gpra_5_actual")
+```
+
+### 5.6 SBMH Summary Table
+
+```{r sbmh-summary-table}
+sbmh_gpra_cols <- list(
+  list("gpra_1_target", "GPRA 1 Target"), list("gpra_1_actual", "GPRA 1 Actual"),
+  list("gpra_2_target", "GPRA 2 Target"), list("gpra_2_actual", "GPRA 2 Actual"),
+  list("gpra_4_target", "GPRA 4 Target"), list("gpra_4_actual", "GPRA 4 Actual"),
+  list("gpra_5_target", "GPRA 5 Target"), list("gpra_5_actual", "GPRA 5 Actual")
+)
+
+sbmh_summary <- bind_rows(lapply(sbmh_gpra_cols, function(x) {
+  summarise_gpra_col(sbmh, x[[1]], x[[2]])
+}))
+
+kable(sbmh_summary, format = "html",
+      caption = "Table 2. 2024 SBMH GPRA Targets and Actuals Summary")
+```
+
+---
+
+## 6. Revision Follow-Up
+
+```{r revision-summary}
+bind_rows(
+  revision_summary(mhsp, followup_col = "Follow-Up Needed", label = "MHSP"),
+  revision_summary(sbmh, followup_col = "Follow- Up Needed (revisions)", label = "SBMH")
+) |> kable(format = "html", caption = "Revision Follow-Up Summary")
+```
+
+```{r export-revisions}
+# Export grantees who still need revisions
+filtered_mhsp <- mhsp |>
+  filter(grepl("Yes", `Revisions Required`, ignore.case = TRUE)) |>
+  select(any_of(c("Grant ID", "Grantee Name", "Contact Person", "Contact Email",
+                   "Region", "Current Status", "Follow-Up Needed",
+                   "Revisions Required", "Revisions")))
+
+filtered_sbmh <- sbmh |>
+  filter(grepl("Yes", `Revisions Required?`, ignore.case = TRUE)) |>
+  select(any_of(c("Grant ID", "Grantee Name", "Contact Person", "Contact Email",
+                   "Region", "Current Status", "Follow- Up Needed (revisions)",
+                   "Revisions Required?",
+                   "Please provide more information about the revision")))
+
+write_xlsx(
+  list(MHSP = filtered_mhsp, SBMH = filtered_sbmh),
+  path = "data/IPR_Grantees_Needing_Revisions.xlsx"
+)
+cat("Saved: data/IPR_Grantees_Needing_Revisions.xlsx\n")
+```
+
+---
+
+## 7. Session Info
+
+```{r session-info}
+sessionInfo()
+```

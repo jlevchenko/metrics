@@ -1,0 +1,235 @@
+---
+title: "IPR GPRA Benchmark Tiers -- 2 GPRA Threshold"
+author: "WCER School Mental Health Collaborative"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_notebook:
+    df_print: paged
+    highlight: tango
+    number_sections: yes
+    theme: flatly
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  html_document:
+    df_print: paged
+    highlight: tango
+    number_sections: yes
+    theme: flatly
+    toc: yes
+    toc_float: yes
+---
+
+## Overview
+
+This notebook assigns GPRA benchmark tiers using the **2-GPRA threshold rule**:
+a grantee is elevated to Tier 2 or Tier 3 only if **at least 2** GPRA measures
+fall below the benchmark cutoff. This is the more conservative classification
+compared to `02_IPR_GPRA_Benchmark_1Threshold.Rmd`.
+
+**Tier definitions** (actual as a percentage of target):
+
+| Tier | Criterion |
+|------|-----------|
+| Tier 1 | >= 75% of target (on track) |
+| Tier 2 | 50-74% of target (needs attention) |
+| Tier 3 | < 50% of target, or missing data (priority support) |
+
+**Overall tier rule (2-threshold):** a grantee is elevated only when 2 or more
+GPRA measures are off track; a single off-track measure defaults to Tier 1.
+
+---
+
+## 1. Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+source("R/helpers.R")
+load_packages(c("readxl", "tidyverse", "writexl", "knitr"))
+```
+
+---
+
+## 2. Import and Clean
+
+```{r import-clean, warning=FALSE}
+mhsp <- import_ipr_sheet("data/REVISED_MHSP_IPR_Synthetic.xlsx") |>
+  deduplicate_grants(id_col = "Grant ID") |>
+  clean_gpra_col("GPRA 1A Target (Raw)", "gpra_1a_target") |>
+  clean_gpra_col("GPRA 1A Actual (Raw)", "gpra_1a_actual") |>
+  clean_gpra_col("GPRA 1B Target (Raw)", "gpra_1b_target") |>
+  clean_gpra_col("GPRA 1B Actual (Raw)", "gpra_1b_actual") |>
+  clean_gpra_col("GPRA 2A Target (Raw)", "gpra_2a_target") |>
+  clean_gpra_col("GPRA 2A Actual (Raw)", "gpra_2a_actual") |>
+  clean_gpra_col("GPRA 2B Target (Raw)", "gpra_2b_target") |>
+  clean_gpra_col("GPRA 2B Actual (Raw)", "gpra_2b_actual") |>
+  clean_gpra_col("GPRA 3A Target (Raw)", "gpra_3a_target") |>
+  clean_gpra_col("GPRA 3A Actual (Raw)", "gpra_3a_actual") |>
+  clean_gpra_col("GPRA 3B Target (Raw)", "gpra_3b_target") |>
+  clean_gpra_col("GPRA 3B Actual (Raw)", "gpra_3b_actual") |>
+  standardize_names()
+
+sbmh <- import_ipr_sheet("data/REVISED_SBMH_IPR_Synthetic.xlsx") |>
+  deduplicate_grants(id_col = "Grant ID") |>
+  clean_gpra_col("GPRA 1 (Hired) Target (Raw)",        "gpra_1_target") |>
+  clean_gpra_col("GPRA 1 (Hired) Actual (Raw)",         "gpra_1_actual") |>
+  clean_gpra_col("GPRA 2 (Retention) Target (Raw)",    "gpra_2_target") |>
+  clean_gpra_col("GPRA 2 (Retention) Actual (Raw)",    "gpra_2_actual") |>
+  clean_gpra_col("GPRA 4 (Attrition) Target (Raw)",    "gpra_4_target") |>
+  clean_gpra_col("GPRA 4 (Attrition) Actual (Raw)",    "gpra_4_actual") |>
+  clean_gpra_col("GPRA 5 (Students Served) Target (Raw)", "gpra_5_target") |>
+  clean_gpra_col("GPRA 5 (Students Served) Actual (Raw)", "gpra_5_actual") |>
+  rename(gpra_3_target = `GPRA 3 (Ratio) Target`,
+         gpra_3_actual = `GPRA 3 (Ratio) Actual`) |>
+  standardize_names() |>
+  mutate(
+    gpra3_target_decimal = ratio_to_decimal(gpra3_target),
+    gpra3_actual_decimal = ratio_to_decimal(gpra3_actual)
+  )
+
+# Recode NA sentinel strings in all gpra columns
+recode_gpra_na <- function(df) {
+  df |> mutate(across(
+    contains("gpra", ignore.case = TRUE),
+    ~ na_if(gsub("(N/A|n/a|n/a, 999|na|NA)", "", as.character(.)), "")
+  ))
+}
+mhsp <- recode_gpra_na(mhsp)
+sbmh <- recode_gpra_na(sbmh)
+
+cat("MHSP:", nrow(mhsp), "grantees | SBMH:", nrow(sbmh), "grantees\n")
+```
+
+---
+
+## 3. Revision Tiers
+
+```{r revision-tiers}
+mhsp <- mhsp |>
+  mutate(revision_tier = case_when(
+    followup_needed == TRUE & revised == TRUE & is.na(conf_email_needed) ~ "Tier 2",
+    conf_email_needed == TRUE                                            ~ "Tier 1",
+    followup_needed == TRUE & is.na(revised) & is.na(conf_email_needed) ~ "Tier 3",
+    TRUE ~ NA_character_
+  ))
+
+sbmh <- sbmh |>
+  mutate(revision_tier = case_when(
+    followup_needed == TRUE & revised == TRUE & is.na(conf_email_needed) ~ "Tier 2",
+    conf_email_needed == TRUE                                            ~ "Tier 1",
+    followup_needed == TRUE & is.na(revised) & is.na(conf_email_needed) ~ "Tier 3",
+    TRUE ~ NA_character_
+  ))
+
+bind_rows(
+  mhsp |> count(revision_tier) |> mutate(pct = round(n / sum(n) * 100, 1), Program = "MHSP"),
+  sbmh |> count(revision_tier) |> mutate(pct = round(n / sum(n) * 100, 1), Program = "SBMH")
+) |> kable(format = "html", caption = "Revision Tier Distribution")
+```
+
+---
+
+## 4. GPRA Benchmark Tiers -- 2-Threshold Rule
+
+```{r benchmark-tiers-sbmh}
+sbmh <- sbmh |>
+  mutate(across(c(gpra1_actual, gpra1_target, gpra2_actual, gpra2_target,
+                  gpra3_actual_decimal, gpra3_target_decimal,
+                  gpra4_actual, gpra4_target, gpra5_actual, gpra5_target),
+                as.numeric),
+         gpra1_tier = mapply(benchmark_tier, gpra1_actual, gpra1_target),
+         gpra2_tier = mapply(benchmark_tier, gpra2_actual, gpra2_target),
+         gpra3_tier = mapply(benchmark_tier, gpra3_actual_decimal, gpra3_target_decimal),
+         gpra4_tier = mapply(benchmark_tier, gpra4_actual, gpra4_target),
+         gpra5_tier = mapply(benchmark_tier, gpra5_actual, gpra5_target)) |>
+  mutate(
+    overall_tier_num = pmap_dbl(
+      list(gpra1_tier, gpra2_tier, gpra3_tier, gpra4_tier, gpra5_tier),
+      \(...) assign_overall_tier(..., tiers_required = 2)   # 2-threshold
+    ),
+    benchmark_tier = case_when(
+      overall_tier_num == 3 ~ "Tier 3",
+      overall_tier_num == 2 ~ "Tier 2",
+      overall_tier_num == 1 ~ "Tier 1",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+```{r benchmark-tiers-mhsp}
+mhsp <- mhsp |>
+  mutate(across(c(gpra1_a_actual, gpra1_a_target, gpra1_b_actual, gpra1_b_target,
+                  gpra2_a_actual, gpra2_a_target, gpra2_b_actual, gpra2_b_target,
+                  gpra3_a_actual, gpra3_a_target, gpra3_b_actual, gpra3_b_target),
+                as.numeric),
+         gpra1_a_tier = mapply(benchmark_tier, gpra1_a_actual, gpra1_a_target),
+         gpra1_b_tier = mapply(benchmark_tier, gpra1_b_actual, gpra1_b_target),
+         gpra2_a_tier = mapply(benchmark_tier, gpra2_a_actual, gpra2_a_target),
+         gpra2_b_tier = mapply(benchmark_tier, gpra2_b_actual, gpra2_b_target),
+         gpra3_a_tier = mapply(benchmark_tier, gpra3_a_actual, gpra3_a_target),
+         gpra3_b_tier = mapply(benchmark_tier, gpra3_b_actual, gpra3_b_target)) |>
+  mutate(
+    overall_tier_num = pmap_dbl(
+      list(gpra1_a_tier, gpra1_b_tier, gpra2_a_tier, gpra2_b_tier,
+           gpra3_a_tier, gpra3_b_tier),
+      \(...) assign_overall_tier(..., tiers_required = 2)   # 2-threshold
+    ),
+    benchmark_tier = case_when(
+      overall_tier_num == 3 ~ "Tier 3",
+      overall_tier_num == 2 ~ "Tier 2",
+      overall_tier_num == 1 ~ "Tier 1",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+---
+
+## 5. Tier Distribution Results
+
+```{r tier-results}
+cat("SBMH Benchmark Tier Distribution (2-Threshold):\n")
+sbmh |> count(benchmark_tier) |>
+  mutate(pct = round(n / sum(n) * 100, 1)) |>
+  kable(format = "html")
+
+cat("\nMHSP Benchmark Tier Distribution (2-Threshold):\n")
+mhsp |> count(benchmark_tier) |>
+  mutate(pct = round(n / sum(n) * 100, 1)) |>
+  kable(format = "html")
+```
+
+### Per-GPRA Tier Distributions
+
+```{r gpra-tier-breakdown}
+tier_cols_sbmh <- c("gpra1_tier","gpra2_tier","gpra3_tier","gpra4_tier","gpra5_tier")
+lapply(tier_cols_sbmh, \(col) {
+  sbmh |> count(!!sym(col)) |> mutate(pct = round(n / sum(n) * 100, 1), gpra = col)
+}) |> bind_rows() |> kable(format = "html", caption = "SBMH Per-GPRA Tier Breakdown")
+
+tier_cols_mhsp <- c("gpra1_a_tier","gpra1_b_tier","gpra2_a_tier","gpra2_b_tier",
+                    "gpra3_a_tier","gpra3_b_tier")
+lapply(tier_cols_mhsp, \(col) {
+  mhsp |> count(!!sym(col)) |> mutate(pct = round(n / sum(n) * 100, 1), gpra = col)
+}) |> bind_rows() |> kable(format = "html", caption = "MHSP Per-GPRA Tier Breakdown")
+```
+
+---
+
+## 6. Export
+
+```{r export}
+write_xlsx(
+  list(SBMH = sbmh, MHSP = mhsp),
+  path = "data/IPR_BenchmarkTiers_2Threshold.xlsx"
+)
+cat("Saved: data/IPR_BenchmarkTiers_2Threshold.xlsx\n")
+```
+
+---
+
+## 7. Session Info
+
+```{r session-info}
+sessionInfo()
+```
