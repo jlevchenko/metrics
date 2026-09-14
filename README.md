@@ -121,16 +121,6 @@ additional assistance.
 
 ---
 
-## Notes
-
-- This README reflects the current top-level folder structure and public
-  program background. If you'd like more detail per pipeline (specific
-  scripts, package requirements, input/output file naming conventions),
-  share the contents of each subfolder and I can flesh out the
-  corresponding sections.
-
----
-
 ## Related Repositories
 
 - [`rep`](https://github.com/jlevchenko) -- REP 3.1 component analysis (fidelity, descriptives, outcome models)
