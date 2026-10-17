@@ -1,5 +1,12 @@
 # metrics
 
+> **Note on data:** All data in this repository are **synthetic**. They were
+> generated to mirror the structure of the grantee-submitted APR and IPR
+> files and contain no real grantee, school, or student information. Actual
+> grantee data are restricted under federal data use agreements and are not
+> included. Outputs shown here are illustrative and do not reflect real
+> grantee performance.
+
 **Data Pipelines Supporting METRICS -- the Mental Health Evaluation, Training,
 Research, and Innovation Center for Schools**
 
@@ -113,9 +120,10 @@ additional assistance.
 ## Usage
 
 1. Clone the repository
-2. Each subfolder's scripts expect raw grantee-submitted data in its local
-   `data/` directory; update file paths as needed to point to your local
-   copies (raw grantee data is not included due to data use restrictions)
+2. Each subfolder includes synthetic example data in its `data/` directory so
+   the pipelines run end to end. To use real grantee submissions, replace
+   these files with your local copies and update file paths as needed (real
+   grantee data are not included due to data use restrictions)
 3. Run each pipeline's scripts in order; outputs are written to that
    subfolder's `output/` directory
 
@@ -123,7 +131,7 @@ additional assistance.
 
 ## Related Repositories
 
-- [`rep`](https://github.com/jlevchenko) -- REP 3.1 component analysis (fidelity, descriptives, outcome models)
-- [`rep-4.1`](https://github.com/jlevchenko) -- REP 4.1 outcome analysis (multiple imputation, ANCOVA, robust SEs)
-- [`ipr-registration`](https://github.com/jlevchenko) -- IPR webinar registrant matching pipeline
-- [`power-analysis`](https://github.com/jlevchenko) -- NIMH grant power analysis
+- [`rep`](https://github.com/jlevchenko/rep) -- REP 3.1 component analysis (fidelity, descriptives, outcome models)
+- [`rep-4.1`](https://github.com/jlevchenko/rep-4.1) -- REP 4.1 outcome analysis (multiple imputation, ANCOVA, robust SEs)
+- [`ipr-registration`](https://github.com/jlevchenko/ipr-registration) -- IPR webinar registrant matching pipeline
+- [`power-analysis`](https://github.com/jlevchenko/power-analysis) -- NIMH grant power analysis
